@@ -14,6 +14,7 @@ class RedParser():
     sex_mark = '&sexId='
     base_url = 'https://ws-public.interpol.int/notices/v1/red?'
     url_end = '&resultPerPage=160&page=1'
+    parent_folder = 'C:/persons_red'
 
     @classmethod
     def create_person(cls, urls):
@@ -24,7 +25,7 @@ class RedParser():
             try:
                 sql = '''INSERT INTO red_person (person_url) VALUES (?)'''
                 cursor.execute(sql, (url,))
-                RedParser.get_person_data(url)
+                cls.get_person_data(url)
             except sqlite3.IntegrityError:
                 continue
         conn.commit()
@@ -32,23 +33,38 @@ class RedParser():
 
     @classmethod
     def get_person_data(cls, url):
-        r = requests.get(url)
-        data = r.json()
-        id = str(data["entity_id"])
-        id = id.replace('/','_')
-        parent = 'C:/persons'
-        path = os.path.join(parent, id)
-        os.mkdir(path)
-        json_name = os.path.join(path, id) + '.json'
-        with open(json_name, 'w') as j:
-            json.dump(data,j)
-        img = data['_links']['images']['href']
-        img_data = requests.get(img).json()
-        img_link = img_data['_embedded']['images'][0]['_links']['self']['href']
-        img_name = os.path.join(path,id) + '.jpg'
-        img = requests.get(img_link).content
-        with open(img_name, 'wb') as image:
-            image.write(img)
+        if type(url) is str:
+            r = requests.get(url)
+            data = r.json()
+            id = str(data["entity_id"])
+            id = id.replace('/','_')
+            try:
+                os.mkdir(cls.parent_folder)
+            except FileExistsError:
+                pass
+            path = os.path.join(cls.parent_folder, id)
+            try:
+                os.mkdir(path)
+            except FileExistsError:
+                pass
+            json_name = os.path.join(path, id) + '.json'
+            with open(json_name, 'w') as j:
+                json.dump(data,j)
+            """Comment out the code below to speed up the script during testing. 54-63"""
+            img = data['_links']['images']['href']
+            img_data = requests.get(img).json()
+            try:
+                img_link = img_data['_embedded']['images'][0]['_links']['self']['href']
+                img_name = os.path.join(path,id) + '.jpg'
+                img = requests.get(img_link).content
+                with open(img_name, 'wb') as image:
+                    image.write(img)
+            except IndexError:
+                pass
+            """Comment out the code above to speed up the script during testing. 54-63"""
+        elif type(url) is list or set:
+            for elem in url:
+                cls.get_person_data(elem)
 
 
     @classmethod
@@ -71,7 +87,7 @@ class RedParser():
             person_in_json = data['total']
         except KeyError as e:
             print('Cathing error ----------', e)
-            RedParser.get_json_from_url(url)
+            cls.get_json_from_url(url)
         print(url)
         for person in data['_embedded']['notices']:
             persons.append(person['_links']['self']['href'])
@@ -81,7 +97,7 @@ class RedParser():
     @classmethod
     def get_persons_url(cls, country=0):
         if country:
-            data = RedParser.get_json_from_url(country=country)
+            data = cls.get_json_from_url(country=country)
             total_persons_urls = set()
             if data['count'] <= 160:
                 print(country, data['count'])
@@ -89,14 +105,14 @@ class RedParser():
             else:
                 """If count of person > 160 we added a new filter, added filter with sex"""
                 for sex in sexs:
-                    data = RedParser.get_json_from_url(country=country, sex=sex)
+                    data = cls.get_json_from_url(country=country, sex=sex)
                     if data['count'] <= 160:
                         print(country, sex, data['count'])
                         total_persons_urls = total_persons_urls.union(set(data['persons']))
                     else:
                         """If count of person > 160 we added a new filter, added filter with age"""
                         for year in range(18, 100):
-                            data = RedParser.get_json_from_url(country=country, sex=sex, age=year)
+                            data = cls.get_json_from_url(country=country, sex=sex, age=year)
                             if data['count'] <= 160:
                                 print(country,sex, year, data['count'])
                                 total_persons_urls = total_persons_urls.union(set(data['persons']))
@@ -106,7 +122,7 @@ class RedParser():
                                 count_in_age_set = set()
                                 count_in_age = data['count']
                                 for letter in range(65,91):
-                                    data = RedParser.get_json_from_url(age=year, country=country, sex=sex, name=(chr(letter)))
+                                    data = cls.get_json_from_url(age=year, country=country, sex=sex, name=(chr(letter)))
                                     if data['count'] <= 160:
                                         total_persons_urls = total_persons_urls.union(set(data['persons']))
                                         count_in_age_set = count_in_age_set.union(set(data['persons']))
@@ -116,7 +132,7 @@ class RedParser():
                                     else:
                                         """If count of person > 160 we added a new filter, added second letter in name"""
                                         for fletter in range(65,91):
-                                            data = RedParser.get_json_from_url(age=year, country=country, sex=sex,
+                                            data = cls.get_json_from_url(age=year, country=country, sex=sex,
                                                                                     name=chr(letter), forename=chr(fletter))
                                             if data['count'] <= 160:
                                                 total_persons_urls = total_persons_urls.union(set(data['persons']))
@@ -128,12 +144,22 @@ class RedParser():
                                 total_persons_urls = total_persons_urls.union(count_in_age_set)
         else:
             for country in country_dict:
-                RedParser.get_persons_url(country=country)
+                cls.get_persons_url(country=country)
         # with open('total_persons_urls.json', 'w') as f:
         #     json.dump(tuple(total_persons_urls), f)
         #     print(len(total_persons_urls))
-        RedParser.create_person(total_persons_urls)
-        print(len(total_persons_urls))
+        cls.get_person_data(total_persons_urls)
         return total_persons_urls
 
+
+class YellowParser(RedParser):
+    arest_country_mark = 'nationality='
+    base_url = 'https://ws-public.interpol.int/notices/v1/yellow?'
+    parent_folder = 'C:/persons_yellow'
+
+"""I chose these countries (AO - 6 person in Red and AF - 26 person in Yellow) to speed up testing"""
+YellowParser.get_persons_url(country='AF')
 RedParser.get_persons_url(country='AO')
+
+"""Loading pictures greatly increases the time of work. 
+If you need to speed up the tests, you can disable the loading of images. Comment out code lines 54-63"""
